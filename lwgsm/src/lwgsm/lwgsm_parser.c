@@ -1243,7 +1243,7 @@ lwgsmi_parse_ipd(const char* str) {
     lwgsm_conn_p c;
 
     if (*str == '+') {
-            str += 8;
+            str += 9;
     }
 
     if(!strncmp(str, "recv", 4)){

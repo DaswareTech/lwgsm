@@ -196,8 +196,8 @@ static void process_data_thread(void* arg)
             // }
             // printf("\r\n");
             ESP_LOGD(TAG, "[DATA EVT]: %d", dataBlock.packetLength);
-            // ESP_LOG_BUFFER_CHAR(TAG, dataBlock.packet, dataBlock.packetLength); 
-            //vTaskDelay(100 / portTICK_PERIOD_MS);
+            ESP_LOG_BUFFER_CHAR(TAG, dataBlock.packet, dataBlock.packetLength); 
+            vTaskDelay(100 / portTICK_PERIOD_MS);
             #endif /* LWGSM_CFG_DBG_LL_RECV && LWGSM_CFG_DBG */   
             lwgsm_input_process(dataBlock.packet, dataBlock.packetLength);
             vPortFree(dataBlock.packet);
@@ -309,6 +309,7 @@ static size_t send_data(const void* data, size_t len)
 #endif /* LWGSM_CFG_DBG_LL_SEND && LWGSM_CFG_DBG */
 
     if(len > 0){
+        //vTaskDelay(10 / portTICK_PERIOD_MS);
         sent = uart_write_bytes(LWGSM_UART_NUM, (const char*) data, len);
     } 
 
