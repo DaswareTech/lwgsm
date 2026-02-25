@@ -152,7 +152,10 @@ static void usart_ll_thread(void* arg)
                         dataBlock.packet = pvPortMalloc(buffered_data_len);
                         dataBlock.packetLength = buffered_data_len;
                         dataBlock.packetLength = uart_read_bytes(LWGSM_UART_NUM, dataBlock.packet, dataBlock.packetLength, 10/portTICK_RATE_MS);
-                        xQueueSend(data_to_process_queue_id, &dataBlock, 0);
+                        if(xQueueSend(data_to_process_queue_id, &dataBlock, 0) != pdPASS){
+                            vPortFree(dataBlock.packet);
+                            ESP_LOGW(TAG, "Process queue full, dropping %d bytes", dataBlock.packetLength);
+                        }
                     }
                     break;
                 case UART_BREAK:
@@ -160,6 +163,8 @@ static void usart_ll_thread(void* arg)
                     break;
                 case UART_FIFO_OVF:
                     ESP_LOGE(TAG, "UART FIFO overflow. Queued messages: %d", uxQueueMessagesWaiting(data_to_process_queue_id));
+                    uart_flush_input(LWGSM_UART_NUM);
+                    xQueueReset(uart_event_ll_mbox_id);
                     break;
                 //Others
                 default:
