@@ -147,6 +147,11 @@ static void usart_ll_thread(void* arg)
                 be full.*/
                 case UART_DATA:
                     uart_get_buffered_data_len(LWGSM_UART_NUM, (size_t*)&buffered_data_len);
+                    if(buffered_data_len > (LWGSM_UART_RX_BUF_SIZE * 3 / 4)){
+                        ESP_LOGW(TAG, "RX buf high: %d/%d, proc_q: %d",
+                                 buffered_data_len, LWGSM_UART_RX_BUF_SIZE,
+                                 uxQueueMessagesWaiting(data_to_process_queue_id));
+                    }
                     if(buffered_data_len > 0 && buffered_data_len < 8191){  /* Limit the maximum packet length */
                         buffered_data_len = buffered_data_len > USART_MAX_PACKET_SIZE ? buffered_data_len : USART_MAX_PACKET_SIZE;
                         dataBlock.packet = pvPortMalloc(buffered_data_len);
@@ -162,10 +167,17 @@ static void usart_ll_thread(void* arg)
                     /* This event ocurrs when the GSM module is reset by hardware */
                     break;
                 case UART_FIFO_OVF:
-                    ESP_LOGE(TAG, "UART FIFO overflow. Queued messages: %d", uxQueueMessagesWaiting(data_to_process_queue_id));
+                {
+                    size_t ovf_buf_len = 0;
+                    uart_get_buffered_data_len(LWGSM_UART_NUM, &ovf_buf_len);
+                    ESP_LOGE(TAG, "UART FIFO overflow. rx_buf: %d/%d, proc_q: %d/%d, heap: %u",
+                             ovf_buf_len, LWGSM_UART_RX_BUF_SIZE,
+                             uxQueueMessagesWaiting(data_to_process_queue_id), LWGSM_PROCESS_QUEUE_SIZE,
+                             esp_get_free_heap_size());
                     uart_flush_input(LWGSM_UART_NUM);
                     xQueueReset(uart_event_ll_mbox_id);
                     break;
+                }
                 //Others
                 default:
                     ESP_LOGW(TAG, "uart event not captured type: %d", event.type);
@@ -204,7 +216,15 @@ static void process_data_thread(void* arg)
             ESP_LOG_BUFFER_CHAR(TAG, dataBlock.packet, dataBlock.packetLength); 
             vTaskDelay(100 / portTICK_PERIOD_MS);
             #endif /* LWGSM_CFG_DBG_LL_RECV && LWGSM_CFG_DBG */   
-            lwgsm_input_process(dataBlock.packet, dataBlock.packetLength);
+            {
+                TickType_t t0 = xTaskGetTickCount();
+                lwgsm_input_process(dataBlock.packet, dataBlock.packetLength);
+                TickType_t elapsed = xTaskGetTickCount() - t0;
+                if (elapsed > pdMS_TO_TICKS(50)) {
+                    ESP_LOGW(TAG, "lwgsm_input_process took %lu ms for %d bytes",
+                             (unsigned long)(elapsed * portTICK_PERIOD_MS), dataBlock.packetLength);
+                }
+            }
             vPortFree(dataBlock.packet);
         }
     }
