@@ -728,15 +728,21 @@ lwgsmi_parse_received(lwgsm_recv_t* rcv) {
         is_ok = rcv->len == (7 + CRLF_LEN) && !strcmp(rcv->data, "SEND OK" CRLF);
     }
 
-    /* Check error response */
-    if (!is_ok) {                               /* If still not ok, check if error? */
-        if (!is_error) {                        /* Check basic error aswell */
-            is_error = rcv->data[0] == '+' && !strncmp(rcv->data, "+CMS ERROR", 10);/* First check +CME coded errors */
-            if (!is_error) {
-                is_error = !strcmp(rcv->data, "ERROR" CRLF) || !strcmp(rcv->data, "FAIL" CRLF);
-            }
+    /* Check error response.
+     * Each check is guarded by `if (!is_error)` so every error form accumulates
+     * into `is_error`. A prior unconditional assignment here overwrote the
+     * previous result and caused plain ERROR/FAIL/+CMS ERROR responses to be
+     * treated as not-an-error, hanging the producer thread for block_time. */
+    if (!is_ok) {
+        if (!is_error) {
+            is_error = rcv->data[0] == '+' && !strncmp(rcv->data, "+CMS ERROR", 10);
         }
-        is_error = rcv->data[0] == '+' && !strncmp(rcv->data, "+CME ERROR", 10);/* First check +CME coded errors */
+        if (!is_error) {
+            is_error = !strcmp(rcv->data, "ERROR" CRLF) || !strcmp(rcv->data, "FAIL" CRLF);
+        }
+        if (!is_error) {
+            is_error = rcv->data[0] == '+' && !strncmp(rcv->data, "+CME ERROR", 10);
+        }
         LWGSM_DEBUGW(LWGSM_CFG_DBG_INPUT | LWGSM_DBG_LVL_DANGER | LWGSM_DBG_TYPE_TRACE,
                     is_error, "%s\r\n", rcv->data);
     }
