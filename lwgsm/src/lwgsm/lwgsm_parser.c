@@ -1074,6 +1074,11 @@ lwgsmi_parse_cgnapn(const char* str, uint8_t len)
 
     if(apn_length != 0){
         tmp_apn = lwgsm_mem_calloc(apn_length, sizeof(*tmp_apn));
+        if (tmp_apn == NULL) {
+            /* Mirror the apn_length==0 branch's failure semantics. */
+            lwgsm.msg->msg.network_attach.apn = NULL;
+            return 0;
+        }
         lwgsmi_parse_string(&str, tmp_apn, apn_length, 0);
         lwgsm.msg->msg.network_attach.apn = tmp_apn;
     }
@@ -1179,7 +1184,14 @@ lwgsmi_parse_caopen(const char* str, uint8_t len, uint16_t* is_error)
             conn->status.f.active = 0;
             lwgsm.msg->msg.conn_start.conn_res = LWGSM_CONN_CONNECT_ERROR;
             *is_error = 1;
-            if(conn->remote_host != NULL) { lwgsm_mem_free(conn->remote_host); }
+            /* NULL after free so the connection-lookup walk in
+             * lwgsmi_parse_carecv (line ~1393) — which uses NULL
+             * remote_host as the "first unused slot" sentinel — is not
+             * fooled by a dangling pointer. */
+            if(conn->remote_host != NULL) {
+                lwgsm_mem_free(conn->remote_host);
+                conn->remote_host = NULL;
+            }
         }
 
         lwgsm.msg->res = lwgsmERRCONNFAIL;

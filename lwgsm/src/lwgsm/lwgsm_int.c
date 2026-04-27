@@ -2762,9 +2762,29 @@ lwgsmi_initiate_cmd(lwgsm_msg_t* msg) {
             #else
             lwgsmi_send_number(0, 0, 1);
             #endif /* !LWGSM_SIM7080_TCP_RECV_MANUAL */
-            lwgsm.m.conns[LWGSM_U32((*msg->msg.conn_start.conn)->num)].remote_port = msg->msg.conn_start.port;
-            lwgsm.m.conns[LWGSM_U32((*msg->msg.conn_start.conn)->num)].remote_host = lwgsm_mem_calloc(strlen(msg->msg.conn_start.host)+1, sizeof(char));
-            strcpy(lwgsm.m.conns[LWGSM_U32((*msg->msg.conn_start.conn)->num)].remote_host, msg->msg.conn_start.host);
+            {
+                uint32_t conn_idx = LWGSM_U32((*msg->msg.conn_start.conn)->num);
+                size_t   host_len = strlen(msg->msg.conn_start.host) + 1;
+                char*    new_host = lwgsm_mem_calloc(host_len, sizeof(char)); /* PC-1: NULL-init heap local */
+                lwgsm.m.conns[conn_idx].remote_port = msg->msg.conn_start.port;
+                if (new_host != NULL) {
+                    /* Free any pre-existing remote_host on this slot
+                     * before reassigning, so re-use of a connection slot
+                     * does not leak the prior host string. */
+                    if (lwgsm.m.conns[conn_idx].remote_host != NULL) {
+                        lwgsm_mem_free(lwgsm.m.conns[conn_idx].remote_host);
+                    }
+                    strcpy(new_host, msg->msg.conn_start.host);
+                    lwgsm.m.conns[conn_idx].remote_host = new_host;
+                } else {
+                    /* Allocation failed. Leave the local conn record's
+                     * remote_host as-is (or NULL); the AT command still
+                     * goes out so the connect attempt itself proceeds.
+                     * lwgsm_parser.c's connection-lookup walk treats a
+                     * NULL remote_host as "no further entries," which is
+                     * a benign degradation. */
+                }
+            }
             AT_PORT_SEND_END_AT();
             break;
         }
@@ -2781,11 +2801,25 @@ lwgsmi_initiate_cmd(lwgsm_msg_t* msg) {
         }
         case LWGSM_CMD_CACLOSE: {               /* Close the connection */
             lwgsm_conn_p c = msg->msg.conn_close.conn;
-            if(c->remote_host != NULL){ lwgsm_mem_free(c->remote_host); }
-            if (c != NULL &&
-                /* Is connection already closed or command for this connection is not valid anymore? */
-                (!lwgsm_conn_is_active(c) || c->val_id != msg->msg.conn_close.val_id)) {
+            if (c == NULL) {
                 return lwgsmERR;
+            }
+            /* Stale close (already-closed conn or val_id mismatch). Still
+             * release the host string so it doesn't dangle on the slot,
+             * then bail without sending the AT command. */
+            if (!lwgsm_conn_is_active(c) || c->val_id != msg->msg.conn_close.val_id) {
+                if (c->remote_host != NULL) {
+                    lwgsm_mem_free(c->remote_host);
+                    c->remote_host = NULL;
+                }
+                return lwgsmERR;
+            }
+            /* Normal close path: free + NULL the host string before
+             * sending the AT command so a concurrent reader of the slot
+             * sees NULL rather than a dangling pointer. */
+            if (c->remote_host != NULL) {
+                lwgsm_mem_free(c->remote_host);
+                c->remote_host = NULL;
             }
             AT_PORT_SEND_BEGIN_AT();
             AT_PORT_SEND_CONST_STR("+CACLOSE=");
