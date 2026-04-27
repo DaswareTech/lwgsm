@@ -218,6 +218,12 @@ static void process_data_thread(void* arg)
     }
 
     vQueueDelete(data_to_process_queue_id);
+    /* NULL the global queue handle so the init path's
+     * `if (data_to_process_queue_id == NULL) xQueueCreate(...)` correctly
+     * creates a fresh queue on a re-init. Without this, the next init
+     * silently skipped queue creation and the reader thread was started
+     * against a deleted FreeRTOS queue object. */
+    data_to_process_queue_id = NULL;
     process_data_thread_id = NULL;
     lwgsm_sys_thread_terminate(&process_data_thread_id);
 }
@@ -405,9 +411,14 @@ lwgsmr_t lwgsm_ll_deinit(lwgsm_ll_t* ll)
 #endif
     if (uart_event_ll_mbox_id != NULL) {
         uart_event_t event;
-        uart_event_t* eventPtr = &event;
-        /* Empty queue if there are messages */
-        while(lwgsm_sys_mbox_get(&uart_event_ll_mbox_id, (void **)&eventPtr, 10) != LWGSM_SYS_TIMEOUT);
+        /* Drain remaining UART events with raw xQueueReceive — this queue
+         * was created by uart_driver_install with uxItemSize =
+         * sizeof(uart_event_t). The lwgsm_sys_mbox_get wrapper is for
+         * queues that store single-pointer freertos_mbox items (4 bytes);
+         * using it here memcpy'd sizeof(uart_event_t) bytes into a 4-byte
+         * stack local and corrupted the stack. The reader thread at
+         * usart_ll_thread() uses the correct raw-xQueueReceive pattern. */
+        while (xQueueReceive(uart_event_ll_mbox_id, &event, pdMS_TO_TICKS(10)) == pdTRUE) { }
         //lwgsm_sys_mbox_delete(&uart_event_ll_mbox_id); // Think it is deleted in the driver delete Todo
         //uart_event_ll_mbox_id = NULL;
     }
