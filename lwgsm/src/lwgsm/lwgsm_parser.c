@@ -1047,6 +1047,10 @@ lwgsmi_parse_cgnapn(const char* str, uint8_t len)
         return 0;
     }
 
+    if (lwgsm.msg->msg.network_attach.apn != NULL) {
+        lwgsm_mem_free_s((void **)&lwgsm.msg->msg.network_attach.apn);
+    }
+
     if (*str == '+') {
         str += 9;
     }

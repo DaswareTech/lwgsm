@@ -832,8 +832,24 @@ extern const size_t         lwgsm_dev_model_map_size;
         (name)->is_blocking = LWGSM_U8((blocking) > 0);   \
     } while (0)
 #define LWGSM_MSG_VAR_REF(name)                   (*(name))
+#if LWGSM_SIM7080
+#define LWGSM_MSG_VAR_FREE_CMD_OWNED(name)        do {\
+        if ((name)->cmd_def == LWGSM_CMD_DEFINE_PDP && (name)->msg.pdp_context.pdp_addr != NULL) { \
+            lwgsm_mem_free_s((void **)&((name)->msg.pdp_context.pdp_addr)); \
+        }                                             \
+        /* SIM7080 +CGNAPN parsing stores a heap APN in the attach message. */ \
+        if ((name)->cmd_def == LWGSM_CMD_NETWORK_ATTACH && (name)->msg.network_attach.apn != NULL) { \
+            lwgsm_mem_free_s((void **)&((name)->msg.network_attach.apn)); \
+        }                                             \
+    } while (0)
+#else
+#define LWGSM_MSG_VAR_FREE_CMD_OWNED(name)        do { } while (0)
+#endif
 #define LWGSM_MSG_VAR_FREE(name)                  do {\
         LWGSM_DEBUGF(LWGSM_CFG_DBG_VAR | LWGSM_DBG_TYPE_TRACE, "[MSG VAR] Free memory: %p\r\n", (name)); \
+        if ((name) != NULL) {                             \
+            LWGSM_MSG_VAR_FREE_CMD_OWNED(name);           \
+        }                                                 \
         if (lwgsm_sys_sem_isvalid(&((name)->sem))) {      \
             lwgsm_sys_sem_delete(&((name)->sem));         \
             lwgsm_sys_sem_invalid(&((name)->sem));        \

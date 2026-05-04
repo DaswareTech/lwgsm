@@ -206,17 +206,23 @@ lwgsm_network_get_reg_status(void) {
 lwgsmr_t
 lwgsm_network_define_pdp_context(const int idx, const lwgsm_apn_pdp_type_t pdp_type, const char* apn, const char* pdp_addr, const lwgsm_apn_d_comp_t d_comp, const lwgsm_apn_h_comp_t h_comp, const bool ipv4_ctrl, const lwgsm_api_cmd_evt_fn evt_fn, void* const evt_arg, const uint32_t blocking)
 {
-    lwgsm_ip_t* pdp_addr_tmp = lwgsm_mem_calloc(1, sizeof(lwgsm_ip_t));
+    lwgsm_ip_t* pdp_addr_tmp;
 
     LWGSM_MSG_VAR_DEFINE(msg);
+
+    if(idx < 1 || idx > 15){
+        return lwgsmERR;
+    }
 
     LWGSM_MSG_VAR_ALLOC(msg, blocking);
     LWGSM_MSG_VAR_SET_EVT(msg, evt_fn, evt_arg);
     LWGSM_MSG_VAR_REF(msg).cmd_def = LWGSM_CMD_DEFINE_PDP;
     LWGSM_MSG_VAR_REF(msg).cmd = LWGSM_CMD_CGACT_SET_0;
 
-    if(idx < 1 || idx > 15){
-        return lwgsmERR;
+    pdp_addr_tmp = lwgsm_mem_calloc(1, sizeof(*pdp_addr_tmp));
+    if (pdp_addr_tmp == NULL) {
+        LWGSM_MSG_VAR_FREE(msg);
+        return lwgsmERRMEM;
     }
 
     LWGSM_MSG_VAR_REF(msg).msg.pdp_context.idx = idx;
