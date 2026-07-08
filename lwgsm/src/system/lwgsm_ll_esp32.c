@@ -122,6 +122,37 @@ static QueueHandle_t data_to_process_queue_id;
 static uint8_t reset_device(uint8_t state);
 #endif /*defined(LWGSM_RESET_PIN)*/
 
+#if (LWGSM_CFG_DBG_LL_SEND || LWGSM_CFG_DBG_LL_RECV) && LWGSM_CFG_DBG
+#include <stdio.h>
+/* AT-level trace for diagnosing wedged commands. Uses printf directly so the
+ * output bypasses esp_log hooks (persistent-log capture) and cannot feed back
+ * into the traffic being traced. Dumps are capped: AT commands and responses
+ * are short ASCII lines, while TLS payload blocks only need their length.
+ * CR is shown as '{', LF as '}' (the "\r\n> " send prompt appears as "{}> "),
+ * other non-printable bytes as '.'. */
+#define AT_TRACE_MAX_DUMP 96
+static void at_trace(const char* dir, const void* data, size_t len)
+{
+    const unsigned char* bytes = data;
+    size_t dump = len < AT_TRACE_MAX_DUMP ? len : AT_TRACE_MAX_DUMP;
+    char buf[AT_TRACE_MAX_DUMP + 1];
+    for (size_t i = 0; i < dump; ++i) {
+        unsigned char c = bytes[i];
+        if (c == '\r') {
+            c = '{';
+        } else if (c == '\n') {
+            c = '}';
+        } else if (c < 0x20 || c > 0x7E) {
+            c = '.';
+        }
+        buf[i] = (char)c;
+    }
+    buf[dump] = '\0';
+    printf("(%u) AT%s %u: %s%s\n", esp_log_timestamp(), dir, (unsigned)len, buf,
+           len > dump ? "..." : "");
+}
+#endif /* (LWGSM_CFG_DBG_LL_SEND || LWGSM_CFG_DBG_LL_RECV) && LWGSM_CFG_DBG */
+
 /**
  * \brief USART receive data
  */
@@ -195,15 +226,8 @@ static void process_data_thread(void* arg)
         if(xQueueReceive(data_to_process_queue_id, &dataBlock, 
                     LWGSM_PROCESS_QUEUE_TIMEOUT_MS/portTICK_PERIOD_MS) == pdPASS){
             #if LWGSM_CFG_DBG_LL_RECV && LWGSM_CFG_DBG
-            // printf("[DATA EVT]:");
-            // for(int i=0; i<dataBlock.packetLength; i++){
-            //     printf("%c", *(dataBlock.packet + i));
-            // }
-            // printf("\r\n");
-            ESP_LOGD(TAG, "[DATA EVT]: %d", dataBlock.packetLength);
-            ESP_LOG_BUFFER_CHAR(TAG, dataBlock.packet, dataBlock.packetLength); 
-            vTaskDelay(100 / portTICK_PERIOD_MS);
-            #endif /* LWGSM_CFG_DBG_LL_RECV && LWGSM_CFG_DBG */   
+            at_trace("<=", dataBlock.packet, dataBlock.packetLength);
+            #endif /* LWGSM_CFG_DBG_LL_RECV && LWGSM_CFG_DBG */
             lwgsm_input_process(dataBlock.packet, dataBlock.packetLength);
             vPortFree(dataBlock.packet);
         }
@@ -308,14 +332,8 @@ static size_t send_data(const void* data, size_t len)
     int sent = 0;
 
 #if LWGSM_CFG_DBG_LL_SEND && LWGSM_CFG_DBG
-    int i = 0;
     if(len > 0){
-        printf("=> (%d bytes):", len);
-        while(len > i){
-            printf("%c", *((const char*)data + i));
-            i++;
-        }
-        printf("\r\n");
+        at_trace("=>", data, len);
     }
 #endif /* LWGSM_CFG_DBG_LL_SEND && LWGSM_CFG_DBG */
 
