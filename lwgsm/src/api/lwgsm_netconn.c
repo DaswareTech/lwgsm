@@ -479,9 +479,11 @@ lwgsm_netconn_receive(lwgsm_netconn_p nc, lwgsm_pbuf_p* pbuf) {
      * or throw error for timeout notification
      */
 #if LWGSM_SIM7080 && LWGSM_SIM7080_TCP_RECV_MANUAL
-    if (lwgsm_sys_mbox_get(&nc->mbox_receive, (void**)pbuf, 10) == LWGSM_SYS_TIMEOUT) {
-        return lwgsmTIMEOUT;
-    }
+    /* Manual mode: data only reaches the mbox through a CARECV command, so a
+     * plain mbox wait would starve direct callers (e.g. SNTP over UDP).
+     * Delegate to the manual fetch loop, which honors rcv_timeout and the
+     * closed marker itself. */
+    return lwgsm_netconn_receive_manual(nc, pbuf, LWGSM_SIM7080_TCP_RECV_LENGTH_MAX);
 #else
     if (lwgsm_sys_mbox_get(&nc->mbox_receive, (void**)pbuf, nc->rcv_timeout) == LWGSM_SYS_TIMEOUT) {
         return lwgsmTIMEOUT;
