@@ -2623,7 +2623,14 @@ lwgsmi_initiate_cmd(lwgsm_msg_t* msg) {
         case LWGSM_CMD_CASRIP_SET:{             /* Show the remote IP and port when print the received data */
             AT_PORT_SEND_BEGIN_AT();
             AT_PORT_SEND_CONST_STR("+CASRIP=");
+#if LWGSM_SIM7080_TCP_RECV_MANUAL
+            /* Keep +CARECV responses in the documented `+CARECV: <len>,<data>`
+             * form; remote ip/port fields would complicate header parsing and
+             * the data owner is always the in-flight command's connection. */
+            lwgsmi_send_number(0, 0, 0);
+#else
             lwgsmi_send_number(1, 0, 0);
+#endif /* LWGSM_SIM7080_TCP_RECV_MANUAL */
             AT_PORT_SEND_END_AT();
             break;
         }

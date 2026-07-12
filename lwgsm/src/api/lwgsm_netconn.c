@@ -515,54 +515,46 @@ lwgsm_netconn_receive(lwgsm_netconn_p nc, lwgsm_pbuf_p* pbuf) {
 lwgsmr_t
 lwgsm_netconn_receive_manual(lwgsm_netconn_p nc, lwgsm_pbuf_p* pbuf, size_t len) {
     lwgsmr_t res;
-    size_t rlen, tlen;
-    uint32_t flag_timeout_count = 0;
-    uint32_t flag_timeout = 5000;
-    uint32_t read_timeout_count = 0;
+    uint32_t waited_ms = 0;
 
     LWGSM_ASSERT("nc != NULL", nc != NULL);
     LWGSM_ASSERT("pbuf != NULL", pbuf != NULL);
 
-    tlen = len;
-
-    LWGSM_DEBUGF(LWGSM_CFG_DBG_NETCONN | LWGSM_DBG_TYPE_TRACE | LWGSM_DBG_LVL_ALL,
-                "[NETCONN]: Waiting packet (%d ms)...\r\n", nc->rcv_timeout);
-
-    do{
-        while(!nc->conn->status.f.data_available && !nc->conn->status.f.full && !nc->conn->status.f.in_closing){
-            lwgsm_delay(10);
-            flag_timeout_count += 10;
-            if(flag_timeout_count >= flag_timeout){
-                read_timeout_count += flag_timeout_count;
-                break;
+    *pbuf = NULL;
+    for (;;) {
+        /* Deliver anything a previous CARECV already queued */
+        if (lwgsm_sys_mbox_getnow(&nc->mbox_receive, (void**)pbuf)) {
+            if ((uint8_t*)(*pbuf) == (uint8_t*)&recv_closed) {
+                *pbuf = NULL;
+                return lwgsmCLOSED;
             }
+            return lwgsmOK;
         }
-        if(read_timeout_count >= nc->rcv_timeout){
-            break;
-        }
-        flag_timeout_count = 0;
-        if(tlen > LWGSM_SIM7080_TCP_RECV_LENGTH_MAX){
-            rlen = LWGSM_SIM7080_TCP_RECV_LENGTH_MAX;
-        }else{
-            rlen = tlen;
-        }
-        res = lwgsm_conn_recv(nc->conn, rlen, 1);
-        tlen -= nc->conn->last_recved;
 
-        if(res != lwgsmOK){
+        if (nc->conn == NULL || !lwgsm_conn_is_active(nc->conn) || nc->conn->status.f.in_closing) {
+            return lwgsmCLOSED;
+        }
+
+        /* Modem reports buffered data (+CADATAIND / +CAURC "recv"): fetch one
+         * chunk inside a CARECV command response — command-scoped framing the
+         * modem cannot interleave with other traffic. `+CARECV: 0` clears the
+         * availability flags, ending this fetch phase. */
+        if (nc->conn->status.f.data_available || nc->conn->status.f.full) {
+            res = lwgsm_conn_recv(nc->conn, LWGSM_MIN(len, LWGSM_SIM7080_TCP_RECV_LENGTH_MAX), 1);
+            if (res != lwgsmOK) {
+                return res;
+            }
+            continue;                           /* Chunk (if any) now sits in the mbox */
+        }
+
+        /* Nothing pending: wait for a data indication, bounded by the receive
+         * timeout. rcv_timeout == 0 keeps netconn semantics (wait forever). */
+        if (nc->rcv_timeout > 0 && waited_ms >= nc->rcv_timeout) {
             return lwgsmTIMEOUT;
         }
-    } while(tlen == len && !nc->conn->status.f.in_closing);
-
-    res = lwgsm_netconn_receive(nc, pbuf);
-    LWGSM_DEBUGF(LWGSM_CFG_DBG_NETCONN | LWGSM_DBG_TYPE_TRACE | LWGSM_DBG_LVL_ALL,
-                "[NETCONN]: Returning... %d/%d", lwgsm_pbuf_length(*pbuf, 1), len);
-    
-    if(res == lwgsmTIMEOUT){
-        LWGSM_DEBUGF(LWGSM_CFG_DBG_NETCONN | LWGSM_DBG_TYPE_TRACE | LWGSM_DBG_LVL_ALL,
-                    "[NETCONN]: Timeout (%d)", len);
+        lwgsm_delay(10);
+        waited_ms += 10;
     }
-    return res;
 }
 #endif /* LWGSM_SIM7080 && LWGSM_SIM7080_TCP_RECV_MANUAL */
 

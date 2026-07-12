@@ -1265,12 +1265,22 @@ lwgsmi_parse_ipd(const char* str) {
     if(!strncmp(str, "recv", 4)){
         str += 5;
         conn = lwgsmi_parse_number(&str);           /* Parse number for connection number */
-        len = lwgsmi_parse_number(&str);            /* Parse number for number of bytes to read */
 
         c = conn < LWGSM_CFG_MAX_CONNS ? &lwgsm.m.conns[conn] : NULL;   /* Get connection handle */
         if (c == NULL) {                            /* Invalid connection number */
             return 0;
         }
+
+#if LWGSM_SIM7080_TCP_RECV_MANUAL
+        /* recv_mode=0: the URC only announces buffered data; no payload
+         * follows on the wire. Never arm a raw read here — mark availability
+         * and let the reader fetch the data inside a CARECV command response,
+         * the only framing this modem provides that cannot interleave with
+         * other responses. */
+        LWGSM_UNUSED(len);
+        c->status.f.data_available = 1;
+#else
+        len = lwgsmi_parse_number(&str);            /* Parse number for number of bytes to read */
 
         while(*str != '\n'){                        /* Ignore the  */
             ++str;
@@ -1280,6 +1290,7 @@ lwgsmi_parse_ipd(const char* str) {
         lwgsm.m.ipd.tot_len = len;                  /* Total number of bytes in this received packet */
         lwgsm.m.ipd.rem_len = len;                  /* Number of remaining bytes to read */
         lwgsm.m.ipd.conn = c;                       /* Pointer to connection we have data for */
+#endif /* LWGSM_SIM7080_TCP_RECV_MANUAL */
     }else if(!strncmp(str, "buffer full", 11)){
         str += 12;
         conn = lwgsmi_parse_number(&str);           /* Parse number for connection number */
@@ -1347,96 +1358,61 @@ lwgsmi_parse_ip_casrip(const char** src, char* dst, size_t dst_len, uint8_t trim
  * \return          `1` on success, `0` otherwise
  */
 uint8_t
-lwgsmi_parse_carecv(const char* str, uint8_t len){
-    int8_t conn;
-    size_t data_len;
-    lwgsm_conn_p c = NULL;
-    lwgsm_conn_p j = NULL;
-    char* parsed_host;
-    const size_t parsed_host_max_len = 60;
-    lwgsm_port_t remote_port, port;
-    uint8_t ncommas = 0;
-    const char* str_test;
+lwgsmi_parse_carecv(const char* str, size_t len){
+    lwgsm_conn_p c;
+    size_t data_len = 0;
+    uint8_t have_digit = 0;
 
-    while(*str != '+' && len > 8){
+    /* Called once per received character with the accumulating line buffer
+     * while a CARECV command is in flight, until it returns `1`. The response
+     * (with AT+CASRIP=0) is either `+CARECV: <len>,<raw data>` or
+     * `+CARECV: 0` when the modem buffer is empty. The payload always belongs
+     * to the connection of the in-flight command, so no connection lookup is
+     * performed. Returning `1` on the ',' character matters: the raw-read
+     * init block in lwgsmi_process() runs in that same character iteration,
+     * so payload byte 1 lands in the ipd reader, not the line buffer. */
+    if (lwgsm.msg == NULL || lwgsm.msg->msg.conn_recv.conn == NULL) {
+        return 0;
+    }
+    c = lwgsm.msg->msg.conn_recv.conn;
+
+    if (len < 9) {                              /* Shortest useful prefix: "+CARECV: " */
+        return 0;
+    }
+    if (strncmp(str, "+CARECV:", 8)) {
+        return 0;                               /* Other line in flight; its '\n' resets the buffer */
+    }
+    str += 8;
+    len -= 8;
+    while (len > 0 && *str == ' ') {
         ++str;
         --len;
     }
-    if(len < 8){
-        return 0;
+    while (len > 0 && *str >= '0' && *str <= '9') {
+        data_len = data_len * 10u + (size_t)(*str - '0');
+        ++str;
+        --len;
+        have_digit = 1;
     }
-    str_test = str;
-    
-    if(strncmp(str_test, "+CARECV:", 8)){
+    if (!have_digit || len == 0) {
+        return 0;                               /* Length field not complete yet */
+    }
+
+    if (*str == ',' && data_len > 0) {          /* Raw payload starts right after this comma */
+        lwgsm.m.ipd.read = 1;                   /* Start reading network data */
+        lwgsm.m.ipd.tot_len = data_len;         /* Total number of bytes in this response */
+        lwgsm.m.ipd.rem_len = data_len;         /* Number of remaining bytes to read */
+        lwgsm.m.ipd.conn = c;                   /* Data belongs to the command's connection */
+        c->last_recved = data_len;
         return 1;
-    }else{
-        str_test += 8;
-        len -= 8;
-        if(!strncmp(str_test, " 0", 2)){
-            c = lwgsm.msg->msg.conn_recv.conn;
-            c->status.f.data_available = 0;             /* Reset data available flag */
-            c->status.f.full = 0;                       /* Reset buffer full flag */
-            c->last_recved = 0;                         /* No data received */
-            return 1;
-        }
-        while(len > 0){
-            if(*str_test == ','){
-                ncommas++;
-                if(ncommas == 3){
-                    break;
-                }
-            }
-            str_test++;
-            len--;
-        }
-        if(ncommas < 3){
-            return 0;
-        }
     }
 
-    if (*str == '+') {
-            str += 9;
-    }
-    
-    data_len = lwgsmi_parse_number(&str);            /* Parse number for number of bytes to read */
-    if(data_len > 0){
-        parsed_host = lwgsm_mem_calloc(parsed_host_max_len, sizeof(char));
-        lwgsmi_parse_ip_casrip(&str, parsed_host, parsed_host_max_len, 1);   /* Parse IP name*/
-        remote_port = lwgsmi_parse_number(&str);    /* Parse port */
-        for(conn=LWGSM_CFG_MAX_CONNS; conn>0; conn--){
-            j = &lwgsm.m.conns[conn-1];
-            if(j != NULL){
-                if(j->remote_host == NULL){
-                    break;
-                }
-                port = lwgsm_conn_get_remote_port(j);
-                if(strlen(j->remote_host) == strlen(parsed_host)){
-                    if(!strcmp(j->remote_host, parsed_host)){
-                        if(remote_port == port){
-                            c = j;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
-        if(parsed_host != NULL){ lwgsm_mem_free(parsed_host); }
-
-        if (c == NULL) {                            /* Invalid connection number */
-            return 1;
-        }
-
-        while(*str != ','){                        /* Advance until the next comma where the data should start  */
-            ++str;
-        }
-
-        lwgsm.m.ipd.read = 1;                       /* Start reading network data */
-        lwgsm.m.ipd.tot_len = data_len;             /* Total number of bytes in this received packet */
-        lwgsm.m.ipd.rem_len = data_len;             /* Number of remaining bytes to read */
-        lwgsm.m.ipd.conn = c;                       /* Pointer to connection we have data for */
-        c->last_recved = data_len;                  /* Return the number of bytes read */
-    }
+    /* `+CARECV: 0` (or a trailer we don't recognize): no payload follows.
+     * The modem-side buffer is drained; clear availability so the reader
+     * stops issuing CARECV until the next data indication. */
+    c->status.f.data_available = 0;
+    c->status.f.full = 0;
+    c->last_recved = 0;
     return 1;
 }
 
