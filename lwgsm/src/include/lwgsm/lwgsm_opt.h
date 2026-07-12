@@ -696,7 +696,15 @@ void *  my_memset(void* dst, int b, size_t len);
 #endif 
 #ifndef LWGSM_SIM7080_TCP_RECV_LENGTH_MAX
 #define LWGSM_SIM7080_TCP_RECV_LENGTH_MAX    1460
-#endif 
+#endif
+#ifndef LWGSM_SIM7080_TCP_RECV_POLL_MS
+/* Manual mode: probe the modem with CARECV after this long without a data
+ * indication while a reader is blocked. With CAOPEN urc-mode 0 the firmware
+ * may buffer received data without emitting any URC at all, so waiting on
+ * indications alone can starve forever. A probe on an empty buffer costs one
+ * `+CARECV: 0` round trip (~20 ms). */
+#define LWGSM_SIM7080_TCP_RECV_POLL_MS       500
+#endif
 
 /**
  * \brief           Set debug level for memory manager

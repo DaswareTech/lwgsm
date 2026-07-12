@@ -518,6 +518,7 @@ lwgsmr_t
 lwgsm_netconn_receive_manual(lwgsm_netconn_p nc, lwgsm_pbuf_p* pbuf, size_t len) {
     lwgsmr_t res;
     uint32_t waited_ms = 0;
+    uint32_t idle_ms = 0;
 
     LWGSM_ASSERT("nc != NULL", nc != NULL);
     LWGSM_ASSERT("pbuf != NULL", pbuf != NULL);
@@ -537,11 +538,14 @@ lwgsm_netconn_receive_manual(lwgsm_netconn_p nc, lwgsm_pbuf_p* pbuf, size_t len)
             return lwgsmCLOSED;
         }
 
-        /* Modem reports buffered data (+CADATAIND / +CAURC "recv"): fetch one
-         * chunk inside a CARECV command response — command-scoped framing the
-         * modem cannot interleave with other traffic. `+CARECV: 0` clears the
-         * availability flags, ending this fetch phase. */
-        if (nc->conn->status.f.data_available || nc->conn->status.f.full) {
+        /* Fetch a chunk inside a CARECV command response — command-scoped
+         * framing the modem cannot interleave with other traffic — when the
+         * modem indicated buffered data (+CADATAIND / +CAURC "recv") or,
+         * because urc-mode 0 firmware may buffer silently, as a periodic
+         * probe. `+CARECV: 0` clears the availability flags. */
+        if (nc->conn->status.f.data_available || nc->conn->status.f.full
+            || idle_ms >= LWGSM_SIM7080_TCP_RECV_POLL_MS) {
+            idle_ms = 0;
             res = lwgsm_conn_recv(nc->conn, LWGSM_MIN(len, LWGSM_SIM7080_TCP_RECV_LENGTH_MAX), 1);
             if (res != lwgsmOK) {
                 return res;
@@ -549,13 +553,15 @@ lwgsm_netconn_receive_manual(lwgsm_netconn_p nc, lwgsm_pbuf_p* pbuf, size_t len)
             continue;                           /* Chunk (if any) now sits in the mbox */
         }
 
-        /* Nothing pending: wait for a data indication, bounded by the receive
-         * timeout. rcv_timeout == 0 keeps netconn semantics (wait forever). */
+        /* Nothing pending: wait for a data indication or the next probe slot,
+         * bounded by the receive timeout. rcv_timeout == 0 keeps netconn
+         * semantics (wait forever). */
         if (nc->rcv_timeout > 0 && waited_ms >= nc->rcv_timeout) {
             return lwgsmTIMEOUT;
         }
         lwgsm_delay(10);
         waited_ms += 10;
+        idle_ms += 10;
     }
 }
 #endif /* LWGSM_SIM7080 && LWGSM_SIM7080_TCP_RECV_MANUAL */
