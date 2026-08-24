@@ -84,9 +84,11 @@ process_sim_evt(lwgsm_evt_t* evt, char** out)
         break;
     }
 
+    /* +1 for the terminating NUL: snprintf(NULL, 0, ...) returns the length
+     * without it (previously truncated the last character). */
     report_len = snprintf(NULL, 0, body);
-    *out = lwgsm_mem_malloc(report_len);
-    snprintf(*out, report_len, body);
+    *out = lwgsm_mem_malloc(report_len + 1);
+    snprintf(*out, report_len + 1, body);
 
     return 1;
 }
