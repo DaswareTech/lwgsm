@@ -429,6 +429,9 @@ lwgsm_netconn_write(lwgsm_netconn_p nc, const void* data, size_t btw) {
  */
 lwgsmr_t
 lwgsm_netconn_flush(lwgsm_netconn_p nc) {
+    lwgsmr_t res = lwgsmOK;
+    size_t sent = 0, to_send;
+
     LWGSM_ASSERT("nc != NULL", nc != NULL);
     LWGSM_ASSERT("nc->type must be TCP or SSL", nc->type == LWGSM_NETCONN_TYPE_TCP || nc->type == LWGSM_NETCONN_TYPE_SSL);
     LWGSM_ASSERT("nc->conn must be active", lwgsm_conn_is_active(nc->conn));
@@ -439,11 +442,18 @@ lwgsm_netconn_flush(lwgsm_netconn_p nc) {
      */
     if (nc->buff.buff != NULL) {                /* Check remaining data */
         if (nc->buff.ptr > 0) {                 /* Do we have data in current buffer? */
-            lwgsm_conn_send(nc->conn, nc->buff.buff, nc->buff.ptr, NULL, 1);/* Send data */
+            to_send = nc->buff.ptr;
+            res = lwgsm_conn_send(nc->conn, nc->buff.buff, to_send, &sent, 1);/* Send data */
+            /* A short send means the byte stream is truncated on the wire;
+             * report it so the caller can tear the session down. Previously
+             * the result was discarded and buffered data vanished silently. */
+            if (res == lwgsmOK && sent != to_send) {
+                res = lwgsmERR;
+            }
         }
         lwgsm_mem_free_s((void**)&nc->buff.buff);
     }
-    return lwgsmOK;
+    return res;
 }
 
 /**

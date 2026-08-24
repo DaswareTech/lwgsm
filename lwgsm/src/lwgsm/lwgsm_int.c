@@ -996,6 +996,50 @@ lwgsmi_parse_received(lwgsm_recv_t* rcv) {
                 is_ok = 0;
             }
             lwgsmi_process_cipsend_response(rcv, &is_ok, &is_error);
+#if LWGSM_SIM7080
+        } else if (CMD_IS_CUR(LWGSM_CMD_CASEND) && lwgsm.msg->msg.conn_send.wait_send_ok_err) {
+            /* SIM7080 has no SEND OK / SEND FAIL URCs: a chunk's outcome is
+             * the plain OK/ERROR that terminates AT+CASEND itself. Without
+             * this arm the first chunk's OK completed the whole command:
+             * sent_all/bw stayed 0, the remaining chunks were never
+             * transmitted and every write >= LWGSM_CFG_CONN_MAX_DATA_LEN
+             * truncated the byte stream on the wire. Route the result into
+             * the shared chunk accounting (advance + next chunk on OK,
+             * bounded same-chunk retry on ERROR).
+             *
+             * lwgsmi_tcpip_process_data_sent() returns 1 both when everything
+             * was sent AND when it stops early (connection closed, next chunk
+             * failed to start, retries exhausted). Only report command
+             * success when btw reached 0 — a partial send must complete as an
+             * error so the caller tears the (already truncated) stream down
+             * instead of continuing. */
+            if (is_ok) {
+                lwgsm.msg->msg.conn_send.wait_send_ok_err = 0;
+                is_ok = 0;
+                if (lwgsmi_tcpip_process_data_sent(1)) {
+                    if (lwgsm.msg->msg.conn_send.btw == 0) {
+                        is_ok = 1;              /* All data on the wire */
+                        if (lwgsm.msg->msg.conn_send.conn->status.f.active) {
+                            CONN_SEND_DATA_SEND_EVT(lwgsm.msg, lwgsmOK);
+                        }
+                    } else {
+                        is_error = 1;           /* Stopped early: partial send */
+                        if (lwgsm.msg->msg.conn_send.conn->status.f.active) {
+                            CONN_SEND_DATA_SEND_EVT(lwgsm.msg, lwgsmERR);
+                        }
+                    }
+                }                               /* else: next chunk in flight */
+            } else if (is_error) {
+                lwgsm.msg->msg.conn_send.wait_send_ok_err = 0;
+                is_error = 0;
+                if (lwgsmi_tcpip_process_data_sent(0)) {
+                    is_error = 1;               /* Retries exhausted or cannot continue */
+                    if (lwgsm.msg->msg.conn_send.conn->status.f.active) {
+                        CONN_SEND_DATA_SEND_EVT(lwgsm.msg, lwgsmERR);
+                    }
+                }                               /* else: same chunk re-issued (bounded retry) */
+            }
+#endif /* LWGSM_SIM7080 */
 #endif /* LWGSM_CFG_CONN */
 #if LWGSM_CFG_USSD
         } else if (CMD_IS_CUR(LWGSM_CMD_CUSD)) {
