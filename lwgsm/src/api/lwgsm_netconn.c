@@ -359,6 +359,15 @@ lwgsm_netconn_write(lwgsm_netconn_p nc, const void* data, size_t btw) {
             if (res != lwgsmOK) {
                 return res;
             }
+            /* A send that fails mid-sequence (e.g. connection closed between
+             * chunks) completes with lwgsmOK but a short `sent` (see
+             * lwgsmi_tcpip_process_data_sent: its early-stop return value is
+             * stored in *is_ok). The byte stream is truncated at this point,
+             * so continuing would feed the peer corrupted data; fail the
+             * write and let the caller tear the session down. */
+            if (sent != nc->buff.len) {
+                return lwgsmERR;
+            }
         } else {
             return lwgsmOK;                     /* Buffer is not yet full yet */
         }
@@ -371,6 +380,15 @@ lwgsm_netconn_write(lwgsm_netconn_p nc, const void* data, size_t btw) {
         res = lwgsm_conn_send(nc->conn, d, btw - rem, &sent, 1);/* Write data directly */
         if (res != lwgsmOK) {
             return res;
+        }
+        /* Same partial-send-reported-OK case as Step 1.1 above. Beyond the
+         * truncated stream, this one used to corrupt the heap: the leftover
+         * btw exceeded LWGSM_CFG_CONN_MAX_DATA_LEN and Step 4's memcpy
+         * overflowed the freshly allocated write buffer (observed on target
+         * as TLS ciphertext sprayed over the adjacent free block when the
+         * SIM7080 closed the connection mid multi-chunk CASEND). */
+        if (sent != btw - rem) {
+            return lwgsmERR;
         }
         d += sent;                              /* Advance in data pointer */
         btw -= sent;                            /* Decrease remaining data to send */
@@ -389,6 +407,12 @@ lwgsm_netconn_write(lwgsm_netconn_p nc, const void* data, size_t btw) {
 
     /* Step 4 */
     if (nc->buff.buff != NULL) {                /* Memory available? */
+        /* Defensive bound: never overflow the write buffer, whatever the
+         * earlier steps concluded about how much data remains. */
+        if (btw > nc->buff.len - nc->buff.ptr) {
+            lwgsm_mem_free_s((void**)&nc->buff.buff);
+            return lwgsmERR;
+        }
         LWGSM_MEMCPY(&nc->buff.buff[nc->buff.ptr], d, btw); /* Copy data to buffer */
         nc->buff.ptr += btw;
     } else {                                    /* Still no memory available? */
