@@ -45,8 +45,11 @@ network_utils_process_reg_change(lwgsm_evt_t* evt, char** out) {
             body = "Other.\0";
     }
 
+    /* +1 for the terminating NUL: the second snprintf writes it at
+     * out[report_len], one past a report_len-byte allocation (caught on
+     * target by heap poisoning as a bad tail canary on free). */
     report_len = strlen(header) + strlen(body);
-    *out = lwgsm_mem_calloc(report_len, sizeof(char));
+    *out = lwgsm_mem_calloc(report_len + 1, sizeof(char));
     snprintf(*out, strlen(header)+1, header);
     snprintf(*out+strlen(header), strlen(body)+1, body);
 
@@ -66,19 +69,22 @@ network_utils_process_curr_operator(lwgsm_evt_t* evt, char** out) {
     o = lwgsm_evt_network_operator_get_current(evt);
     if (o != NULL) {
         switch (o->format) {
+            /* snprintf(NULL, 0, ...) returns the length WITHOUT the NUL;
+             * allocate +1 so the ++report_len-sized write below stays in
+             * bounds instead of dropping the NUL one past the buffer. */
             case LWGSM_OPERATOR_FORMAT_LONG_NAME:
                 report_len = snprintf(NULL, 0, "Operator long name: %s", o->data.long_name);
-                *out = lwgsm_mem_calloc(report_len, sizeof(char));
+                *out = lwgsm_mem_calloc(report_len + 1, sizeof(char));
                 snprintf(*out, ++report_len, "Operator long name: %s", o->data.long_name);
                 break;
             case LWGSM_OPERATOR_FORMAT_SHORT_NAME:
                 report_len = snprintf(NULL, 0, "Operator short name: %s", o->data.short_name);
-                *out = lwgsm_mem_calloc(report_len, sizeof(char));
+                *out = lwgsm_mem_calloc(report_len + 1, sizeof(char));
                 snprintf(*out, ++report_len, "Operator short name: %s", o->data.short_name);
                 break;
             case LWGSM_OPERATOR_FORMAT_NUMBER:
                 report_len = snprintf(NULL, 0, "Operator number: %d", (int)o->data.num);
-                *out = lwgsm_mem_calloc(report_len, sizeof(char));
+                *out = lwgsm_mem_calloc(report_len + 1, sizeof(char));
                 snprintf(*out, ++report_len, "Operator number: %d", (int)o->data.num);
                 break;
             default:
@@ -103,7 +109,9 @@ network_utils_process_rssi(lwgsm_evt_t* evt, char** out) {
     rssi = lwgsm_evt_signal_strength_get_rssi(evt);
 
     /* Write the report in memory */
+    /* +1 for the terminating NUL (this variant truncated the last character
+     * instead of overflowing, but was still one byte short). */
     report_len = snprintf(NULL, 0, "Network operator RSSI: %d dBm\r\n", (int)rssi);
-    *out = lwgsm_mem_calloc(report_len, sizeof(char));
-    snprintf(*out, report_len, "Network operator RSSI: %d dBm\r\n", (int)rssi);
+    *out = lwgsm_mem_calloc(report_len + 1, sizeof(char));
+    snprintf(*out, report_len + 1, "Network operator RSSI: %d dBm\r\n", (int)rssi);
 }
