@@ -90,8 +90,6 @@
 #define USART_THREAD_PRIORITY       ( tskIDLE_PRIORITY + 5 )
 #define USART_QUEUE_TIMEOUT         (portTickType) 5000/portTICK_PERIOD_MS
 
-#define USART_MAX_PACKET_SIZE       2048
-
 #if !defined(LWGSM_READING_THREAD_STACK_SIZE)
 #define LWGSM_READING_THREAD_STACK_SIZE         4096
 #endif /*LWGSM_READING_THREAD_STACK_SIZE*/
@@ -179,11 +177,16 @@ static void usart_ll_thread(void* arg)
                 case UART_DATA:
                     uart_get_buffered_data_len(LWGSM_UART_NUM, (size_t*)&buffered_data_len);
                     if(buffered_data_len > 0 && buffered_data_len < 8191){  /* Limit the maximum packet length */
-                        buffered_data_len = buffered_data_len > USART_MAX_PACKET_SIZE ? buffered_data_len : USART_MAX_PACKET_SIZE;
+                        /* Exactly what is buffered, without waiting: asking for more made uart_read_bytes wait a
+                         * tick after the last byte, delaying every modem response by up to 10 ms. */
                         dataBlock.packet = pvPortMalloc(buffered_data_len);
-                        dataBlock.packetLength = buffered_data_len;
-                        dataBlock.packetLength = uart_read_bytes(LWGSM_UART_NUM, dataBlock.packet, dataBlock.packetLength, 10/portTICK_RATE_MS);
-                        if(xQueueSend(data_to_process_queue_id, &dataBlock, 0) != pdPASS){
+                        if (dataBlock.packet == NULL) {
+                            break;
+                        }
+                        dataBlock.packetLength = uart_read_bytes(LWGSM_UART_NUM, dataBlock.packet, buffered_data_len, 0);
+                        /* Wait a little rather than drop bytes mid-response: chunks are now small, one per UART
+                         * event, and meanwhile the 8 KB UART ring keeps receiving. */
+                        if(xQueueSend(data_to_process_queue_id, &dataBlock, pdMS_TO_TICKS(100)) != pdPASS){
                             vPortFree(dataBlock.packet);
                             ESP_LOGW(TAG, "Process queue full, dropping %d bytes", dataBlock.packetLength);
                         }
