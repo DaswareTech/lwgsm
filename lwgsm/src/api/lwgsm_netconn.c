@@ -70,6 +70,11 @@ typedef struct lwgsm_netconn {
 #if LWGSM_CFG_NETCONN_RECEIVE_TIMEOUT || __DOXYGEN__
     uint32_t rcv_timeout;                       /*!< Receive timeout in unit of milliseconds */
 #endif
+#if LWGSM_SIM7080 && LWGSM_SIM7080_TCP_RECV_MANUAL
+    uint32_t rcv_probe_time;                    /*!< lwgsm_sys_now() of the last CARECV; kept across calls so the
+                                                    periodic probe fires even when each call waits less than
+                                                    LWGSM_SIM7080_TCP_RECV_POLL_MS */
+#endif
 } lwgsm_netconn_t;
 
 static uint8_t recv_closed = 0xFF;
@@ -552,7 +557,6 @@ lwgsmr_t
 lwgsm_netconn_receive_manual(lwgsm_netconn_p nc, lwgsm_pbuf_p* pbuf, size_t len) {
     lwgsmr_t res;
     uint32_t waited_ms = 0;
-    uint32_t idle_ms = 0;
 
     LWGSM_ASSERT("nc != NULL", nc != NULL);
     LWGSM_ASSERT("pbuf != NULL", pbuf != NULL);
@@ -578,8 +582,8 @@ lwgsm_netconn_receive_manual(lwgsm_netconn_p nc, lwgsm_pbuf_p* pbuf, size_t len)
          * because urc-mode 0 firmware may buffer silently, as a periodic
          * probe. `+CARECV: 0` clears the availability flags. */
         if (nc->conn->status.f.data_available || nc->conn->status.f.full
-            || idle_ms >= LWGSM_SIM7080_TCP_RECV_POLL_MS) {
-            idle_ms = 0;
+            || (uint32_t)(lwgsm_sys_now() - nc->rcv_probe_time) >= LWGSM_SIM7080_TCP_RECV_POLL_MS) {
+            nc->rcv_probe_time = lwgsm_sys_now();
             res = lwgsm_conn_recv(nc->conn, LWGSM_MIN(len, LWGSM_SIM7080_TCP_RECV_LENGTH_MAX), 1);
             if (res != lwgsmOK) {
                 return res;
@@ -595,7 +599,6 @@ lwgsm_netconn_receive_manual(lwgsm_netconn_p nc, lwgsm_pbuf_p* pbuf, size_t len)
         }
         lwgsm_delay(10);
         waited_ms += 10;
-        idle_ms += 10;
     }
 }
 #endif /* LWGSM_SIM7080 && LWGSM_SIM7080_TCP_RECV_MANUAL */

@@ -58,7 +58,7 @@ lwgsm_sys_deinit(void) {
 
 uint32_t
 lwgsm_sys_now(void) {
-    return xTaskGetTickCount();
+    return xTaskGetTickCount() * portTICK_PERIOD_MS;     /* lwgsm expects milliseconds, not ticks */
 }
 
 uint8_t
