@@ -34,6 +34,7 @@
 #include "lwgsm/lwgsm_private.h"
 #include "lwgsm/lwgsm_parser.h"
 #include "lwgsm/lwgsm_mem.h"
+#include "lwgsm/lwgsm_timing.h"
 
 /**
  * \brief           Parse number from string
@@ -1279,6 +1280,7 @@ lwgsmi_parse_ipd(const char* str) {
          * other responses. */
         LWGSM_UNUSED(len);
         c->status.f.data_available = 1;
+        lwgsm_timing_mark(LWGSM_TIMING_DATA_IND);
 #else
         len = lwgsmi_parse_number(&str);            /* Parse number for number of bytes to read */
 
@@ -1404,6 +1406,7 @@ lwgsmi_parse_carecv(const char* str, size_t len){
         lwgsm.m.ipd.rem_len = data_len;         /* Number of remaining bytes to read */
         lwgsm.m.ipd.conn = c;                   /* Data belongs to the command's connection */
         c->last_recved = data_len;
+        lwgsm_timing_mark(LWGSM_TIMING_RECV_DATA);
         return 1;
     }
 
@@ -1413,6 +1416,7 @@ lwgsmi_parse_carecv(const char* str, size_t len){
     c->status.f.data_available = 0;
     c->status.f.full = 0;
     c->last_recved = 0;
+    lwgsm_timing_mark(LWGSM_TIMING_RECV_EMPTY);
     return 1;
 }
 
@@ -1433,6 +1437,7 @@ uint8_t lwgsmi_parse_dataind(const char* str){
     }
     
     conn->status.f.data_available = 1;
+    lwgsm_timing_mark(LWGSM_TIMING_DATA_IND);
 
     return 1;
 }
