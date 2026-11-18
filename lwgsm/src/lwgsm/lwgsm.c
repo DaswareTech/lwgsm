@@ -35,6 +35,7 @@
 #include "lwgsm/lwgsm_mem.h"
 #include "lwgsm/lwgsm_threads.h"
 #include "system/lwgsm_ll.h"
+#include "lwgsm/lwgsm_timing.h"
 
 #if LWGSM_CFG_OS != 1
 #error LWGSM_CFG_OS must be set to 1!
@@ -480,4 +481,9 @@ lwgsm_device_is_present(void) {
     res = lwgsm.status.f.dev_present;
     lwgsm_core_unlock();
     return res;
+}
+
+__attribute__((weak)) void
+lwgsm_timing_mark(lwgsm_timing_point_t point) {
+    LWGSM_UNUSED(point);
 }

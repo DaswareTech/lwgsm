@@ -36,6 +36,7 @@
 #include "lwgsm/lwgsm_int.h"
 #include "lwgsm/lwgsm_mem.h"
 #include "lwgsm/lwgsm_parser.h"
+#include "lwgsm/lwgsm_timing.h"
 #include "lwgsm/lwgsm_unicode.h"
 #include "system/lwgsm_ll.h"
 
@@ -562,6 +563,7 @@ lwgsmi_tcpip_process_send_data(void) {
 #if !LWGSM_SIM7080
     AT_PORT_SEND_CONST_STR("+CIPSEND=");
 #else
+    lwgsm_timing_mark(LWGSM_TIMING_SEND_START);
     AT_PORT_SEND_CONST_STR("+CASEND=");
 #endif
     lwgsmi_send_number(LWGSM_U32(c->num), 0, 0);/* Send connection number */
@@ -1016,6 +1018,7 @@ lwgsmi_parse_received(lwgsm_recv_t* rcv) {
             if (is_ok) {
                 lwgsm.msg->msg.conn_send.wait_send_ok_err = 0;
                 is_ok = 0;
+                lwgsm_timing_mark(LWGSM_TIMING_SEND_DONE);
                 if (lwgsmi_tcpip_process_data_sent(1)) {
                     if (lwgsm.msg->msg.conn_send.btw == 0) {
                         is_ok = 1;              /* All data on the wire */
