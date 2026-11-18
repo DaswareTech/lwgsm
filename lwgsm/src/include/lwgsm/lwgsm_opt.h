@@ -697,6 +697,12 @@ void *  my_memset(void* dst, int b, size_t len);
 #ifndef LWGSM_SIM7080_TCP_RECV_LENGTH_MAX
 #define LWGSM_SIM7080_TCP_RECV_LENGTH_MAX    1460
 #endif
+#ifndef LWGSM_SIM7080_RESET_POWER_DOWN
+/* SIM7080: reset the module with AT+CPOWD=1 (normal power down) instead of AT+CFUN=1,1. It only comes back if the
+ * board powers it on again by itself, as the M5Stack CatM units do: their PWRKEY is tied to STATUS, so the module
+ * restarts as soon as it is off. Both commands restart the module firmware; this one also powers it down. */
+#define LWGSM_SIM7080_RESET_POWER_DOWN       0
+#endif
 #ifndef LWGSM_SIM7080_TCP_RECV_POLL_MS
 /* Manual mode: probe the modem with CARECV after this long without a data
  * indication while a reader is blocked. With CAOPEN urc-mode 0 the firmware

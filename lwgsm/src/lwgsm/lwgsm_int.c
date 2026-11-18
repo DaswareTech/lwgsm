@@ -729,6 +729,11 @@ lwgsmi_parse_received(lwgsm_recv_t* rcv) {
     if (!is_ok) {                               /* Check for SHUT OK string */
         is_ok = rcv->len == (7 + CRLF_LEN) && !strcmp(rcv->data, "SEND OK" CRLF);
     }
+#if LWGSM_SIM7080 && LWGSM_SIM7080_RESET_POWER_DOWN
+    if (!is_ok && CMD_IS_CUR(LWGSM_CMD_RESET)) { /* AT+CPOWD=1 answers this instead of OK */
+        is_ok = !strcmp(rcv->data, "NORMAL POWER DOWN" CRLF);
+    }
+#endif
 
     /* Check error response.
      * Each check is guarded by `if (!is_error)` so every error form accumulates
@@ -2002,7 +2007,11 @@ lwgsmi_initiate_cmd(lwgsm_msg_t* msg) {
         case LWGSM_CMD_RESET: {                 /* Reset modem with AT commands */
             /* Send manual AT command */
             AT_PORT_SEND_BEGIN_AT();
+#if LWGSM_SIM7080 && LWGSM_SIM7080_RESET_POWER_DOWN
+            AT_PORT_SEND_CONST_STR("+CPOWD=1");
+#else
             AT_PORT_SEND_CONST_STR("+CFUN=1,1");
+#endif
             AT_PORT_SEND_END_AT();
             break;
         }
