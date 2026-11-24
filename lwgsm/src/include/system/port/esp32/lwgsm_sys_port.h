@@ -61,7 +61,9 @@ typedef UBaseType_t                 lwgsm_sys_thread_prio_t;
 #define LWGSM_SYS_MBOX_NULL           ((QueueHandle_t)0)
 #define LWGSM_SYS_TIMEOUT             ((TickType_t)portMAX_DELAY)
 #define LWGSM_SYS_THREAD_PRIO         (configMAX_PRIORITIES - 1)
+#ifndef LWGSM_SYS_THREAD_SS
 #define LWGSM_SYS_THREAD_SS           (4096)
+#endif /* LWGSM_SYS_THREAD_SS */
 
 #endif /* !__DOXYGEN__ */
 
